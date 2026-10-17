@@ -38,6 +38,10 @@ on:
         description: "Droidspaces容器支持(false/true/extend)"
         required: true
         default: 'false'
+      baseband_guard:
+        description: "启用内核级基带保护(Baseband‑guard)"
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -221,6 +225,7 @@ jobs:
             echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./arch/arm64/configs/gki_defconfig
             echo "CONFIG_TMPFS_XATTR=y" >> ./arch/arm64/configs/gki_defconfig
             # =========完整DroidSpaces内核配置 END=========
+            # 注意：CONFIG_CFS_BANDWIDTH、CONFIG_CGROUP_PIDS 暂不启用，后期研究
 
             # 开启 NTSync
             echo "CONFIG_NTSYNC=y" >> ./arch/arm64/configs/gki_defconfig
@@ -233,6 +238,16 @@ jobs:
               echo "CONFIG_DRM_LINDROID_EVDI=y" >> ./arch/arm64/configs/gki_defconfig
             fi
           fi
+
+      - name: 启用内核级基带保护
+        if: inputs.baseband_guard
+        run: |
+          echo "正在启用启用内核级基带保护支持…"
+          cd kernel_workspace
+          echo "CONFIG_BBG=y" >> ./common/arch/arm64/configs/gki_defconfig
+          cd ./common
+          curl -sSL https://github.com/cctv18/Baseband-guard/raw/master/setup.sh | bash
+          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
       - name: Build kernel
         run: |
