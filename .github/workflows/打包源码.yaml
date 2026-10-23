@@ -44,7 +44,7 @@ jobs:
       - name: Install dependencies
         run: |
          sudo apt update && sudo apt upgrade -y
-         sudo apt install -y python3 git curl zip unzip
+         sudo apt install -y python3 git curl tar zstd
 
       - name: Install repo tool
         run: |
@@ -52,7 +52,7 @@ jobs:
          chmod a+x ~/repo
          sudo mv ~/repo /usr/local/bin/repo
 
-      - name: Repo 同步内核源码
+      - name: Repo同步内核源码
         run: |
          mkdir kernel_workspace && cd kernel_workspace
          repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
@@ -62,16 +62,16 @@ jobs:
          sed -i 's/ -dirty//g' kernel_platform/common/scripts/setlocalversion
          sed -i 's/ -dirty//g' kernel_platform/msm-kernel/scripts/setlocalversion
 
-      - name: 打包源码
+      - name: 打包源码 tar.zst（保存软链接，排除.git，压缩快体积小）
         run: |
           FEIL="${{ github.event.inputs.FEIL }}"
-          SRC_ZIP="KernelSource_${FEIL}.zip"
+          SRC_ARC="KernelSource_${FEIL}.tar.zst"
           cd kernel_workspace
-          zip -r ../$SRC_ZIP ./* -x "*.git/*"
-          echo "SRC_ZIP=$SRC_ZIP" >> $GITHUB_ENV
+          tar --exclude='./.git' -I zstd -cf ../$SRC_ARC .
+          echo "SRC_ARC=$SRC_ARC" >> $GITHUB_ENV
 
-      - name: 上传源码压缩包
+      - name: 上传源码包
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.SRC_ZIP }}
-          path: ./${{ env.SRC_ZIP }}
+          name: ${{ env.SRC_ARC }}
+          path: ./${{ env.SRC_ARC }}
