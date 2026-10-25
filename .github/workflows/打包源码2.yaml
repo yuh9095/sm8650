@@ -179,19 +179,20 @@ jobs:
           curl -sSL https://github.com/cctv18/Baseband-guard/raw/master/setup.sh | bash
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
           echo "CONFIG_BBG=y" >> arch/arm64/configs/gki_defconfig
-
       - name: 全局彻底删除全部 .git 目录 + .repo
         run: |
           find ./kernel_workspace -type d -name ".git" -print0 | xargs -0 rm -rf
           rm -rf ./kernel_workspace/.repo
 
-      - name: zstd -8高压缩打包kernel_workspace 内全部内容
-         run: |
-           SRC_ARCH="kernel_source_${{ github.event.inputs.FEIL }}.tar.zst"
-           tar --use-compress-program="zstd -T0 -8" -C kernel_workspace -cf ${SRC_ARCH} .
-           echo "SRC_ARCH=${SRC_ARCH}" >> $GITHUB_ENV
+      - name: zstd -8高压缩打包 kernel_workspace 内全部内容
+        run: |
+          SRC_ARCH="kernel_source_${{ github.event.inputs.FEIL }}.tar.zst"
+          tar --use-compress-program="zstd -T0 -8" -C kernel_workspace -cf ${SRC_ARCH} .
+          echo "SRC_ARCH=${SRC_ARCH}" >> $GITHUB_ENV
+
       - name: Upload kernel source tar.zst
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.SRC_ARCH }}
           path: ./${{ env.SRC_ARCH }}
+
