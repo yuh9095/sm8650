@@ -185,7 +185,7 @@ jobs:
           find ./kernel_workspace -type d -name ".git" -print0 | xargs -0 rm -rf
           rm -rf ./kernel_workspace/.repo
 
-  - name: zstd -8高压缩打包 kernel_workspace 内全部内容
+      - name: zstd -8高压缩打包kernel_workspace 内全部内容
          run: |
            SRC_ARCH="kernel_source_${{ github.event.inputs.FEIL }}.tar.zst"
            tar --use-compress-program="zstd -T0 -8" -C kernel_workspace -cf ${SRC_ARCH} .
