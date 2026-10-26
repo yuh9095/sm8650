@@ -1,0 +1,277 @@
+name: Build Kernel4
+on:
+  workflow_dispatch:
+    inputs:
+      CPU:
+        description: "内核分支"
+        required: true
+        default: 'sm8650'
+      FEIL:
+        description: "编译配置XML"
+        required: true
+        default: 'oneplus_12_v'
+      CPUD:
+        description: "设备代号"
+        required: true
+        default: 'pineapple'
+      ANDROID_VERSION:
+        description: "安卓版本"
+        required: true
+        default: 'android14'
+      KERNEL_VERSION:
+        description: "内核版本"
+        required: true
+        default: '6.1'
+      bbr_enable:
+        description: 'BBR拥塞控制'
+        required: true
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+          - 'default'
+      droidspaces_enable:
+        description: 'Droidspaces容器支持'
+        required: true
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'standard'
+          - 'extend'
+      better_net:
+        description: 'BPF网络增强'
+        required: true
+        type: boolean
+        default: false
+      ssg_enable:
+        description: 'SSG IO调度'
+        required: true
+        type: boolean
+        default: true
+      baseband_guard:
+        description: '基带保护'
+        required: true
+        type: boolean
+        default: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+      - name: Configure Git
+        run: |
+         git config --global user.name "KernelBuilder"
+         git config --global user.email "builder@localhost"
+      - name: Install dependencies
+        run: |
+         sudo apt update && sudo apt upgrade -y
+         sudo apt install -y python3 git curl patch zip unzip
+      - name: Install repo tool
+        run: |
+         curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
+         chmod a+x ~/repo
+         sudo mv ~/repo /usr/local/bin/repo
+      - name: Initialize repo and sync kernel source
+        run: |
+         mkdir kernel_workspace && cd kernel_workspace
+         repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
+         repo sync
+         rm -f kernel_platform/common/android/abi_gki_protected_exports_*
+         rm -f kernel_platform/msm-kernel/android/abi_gki_protected_exports_*
+         sed -i 's/ -dirty//g' kernel_platform/common/scripts/setlocalversion
+         sed -i 's/ -dirty//g' kernel_platform/msm-kernel/scripts/setlocalversion
+
+      # ==============================================
+      # 动态生成 custom.fragment
+      # ==============================================
+      - name: Generate clean custom.fragment
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          rm -f custom.fragment
+          # 网络增强 BPF
+          if [[ "${{ inputs.better_net }}" == "true" ]]; then
+            echo "CONFIG_BPF_STREAM_PARSER=y" >> custom.fragment
+          fi
+          # BBR 拥塞控制
+          BBR_MODE=${{ inputs.bbr_enable }}
+          if [[ "$BBR_MODE" != "false" ]]; then
+            echo "CONFIG_TCP_CONG_ADVANCED=y" >> custom.fragment
+            echo "CONFIG_TCP_CONG_BBR=y" >> custom.fragment
+            echo "CONFIG_TCP_CONG_CUBIC=y" >> custom.fragment
+            echo "CONFIG_TCP_CONG_VEGAS=y" >> custom.fragment
+            echo "CONFIG_TCP_CONG_NV=y" >> custom.fragment
+            echo "CONFIG_TCP_CONG_WESTWOOD=y" >> custom.fragment
+            echo "CONFIG_TCP_CONG_HTCP=y" >> custom.fragment
+            echo "CONFIG_TCP_CONG_BRUTAL=y" >> custom.fragment
+            if [[ "$BBR_MODE" == "default" ]]; then
+              echo "CONFIG_DEFAULT_TCP_CONG=bbr" >> custom.fragment
+            else
+              echo "CONFIG_DEFAULT_TCP_CONG=cubic" >> custom.fragment
+            fi
+          fi
+          # Droidspaces 容器全套配置
+          DROID=${{ inputs.droidspaces_enable }}
+          if [[ "$DROID" != "false" ]]; then
+            echo "CONFIG_SYSVIPC=y" >> custom.fragment
+            echo "CONFIG_POSIX_MQUEUE=y" >> custom.fragment
+            echo "CONFIG_IPC_NS=y" >> custom.fragment
+            echo "CONFIG_PID_NS=y" >> custom.fragment
+            echo "CONFIG_DEVTMPFS=y" >> custom.fragment
+            echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> custom.fragment
+            echo "CONFIG_USER_NS=y" >> custom.fragment
+            echo "CONFIG_IP6_NF_NAT=y" >> custom.fragment
+            echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> custom.fragment
+            echo "CONFIG_NETFILTER_XT_TARGET_REJECT=y" >> custom.fragment
+            echo "CONFIG_NETFILTER_XT_TARGET_LOG=y" >> custom.fragment
+            echo "CONFIG_NETFILTER_XT_MATCH_RECENT=y" >> custom.fragment
+            echo "CONFIG_IP_SET=y" >> custom.fragment
+            echo "CONFIG_IP_SET_HASH_IP=y" >> custom.fragment
+            echo "CONFIG_IP_SET_HASH_NET=y" >> custom.fragment
+            echo "CONFIG_NETFILTER_XT_SET=y" >> custom.fragment
+            echo "CONFIG_TMPFS_POSIX_ACL=y" >> custom.fragment
+            echo "CONFIG_TMPFS_XATTR=y" >> custom.fragment
+            echo "CONFIG_REKERNEL=y" >> custom.fragment
+            echo "CONFIG_NTSYNC=y" >> custom.fragment
+            if [[ "$DROID" == "extend" ]]; then
+              echo "CONFIG_BT_HCIVHCI=y" >> custom.fragment
+              echo "CONFIG_STATIC_USERMODEHELPER=n" >> custom.fragment
+              echo "CONFIG_DRM_LINDROID_EVDI=y" >> custom.fragment
+            fi
+          fi
+          # SSG IO调度
+          if [[ "${{ inputs.ssg_enable }}" == "true" ]]; then
+            echo "CONFIG_MQ_IOSCHED_SSG=y" >> custom.fragment
+            echo "CONFIG_MQ_IOSCHED_SSG_CGROUP=y" >> custom.fragment
+          fi
+          # 基带保护配置项
+          if [[ "${{ inputs.baseband_guard }}" == "true" ]]; then
+            echo "CONFIG_BBG=y" >> custom.fragment
+          fi
+          echo "===== custom.fragment 内容 ====="
+          cat custom.fragment
+
+      # ==============================================
+      # 修补BUILD.bazel：导入kernel_config_fragment + 注册target
+      # ==============================================
+      - name: Patch BUILD.bazel for kernel_config_fragment
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          sed -i '/"kernel_build",/a\    "kernel_config_fragment",' BUILD.bazel
+          cat >> BUILD.bazel <<'EOF'
+
+kernel_config_fragment(
+    name = "custom.fragment",
+    srcs = ["custom.fragment"],
+)
+EOF
+          echo "==== Check patched BUILD.bazel ===="
+          grep -A10 "kernel_config_fragment" BUILD.bazel
+
+      # ==============================================
+      # 基带保护源码补丁
+      # ==============================================
+      - name: Baseband Guard Patch
+        if: inputs.baseband_guard
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          curl -sSL https://github.com/cctv18/Baseband-guard/raw/master/setup.sh | bash
+          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+
+      # ==============================================
+      # 注入fragment加载参数，修复EXTRA_BAZEL_ARGS覆盖
+      # ==============================================
+      - name: Inject fragment loader to build.config.gki
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          if grep -q '^EXTRA_BAZEL_ARGS=' build.config.gki; then
+              sed -i 's|^EXTRA_BAZEL_ARGS="\(.*\)"|EXTRA_BAZEL_ARGS="\1 --config_fragments=//common:custom.fragment"|' build.config.gki
+          else
+              echo 'EXTRA_BAZEL_ARGS="--config_fragments=//common:custom.fragment"' >> build.config.gki
+          fi
+          echo "===== build.config.gki ====="
+          cat build.config.gki
+
+      # ==============================================
+      # 编译内核
+      # ==============================================
+      - name: Build Official OnePlus GKI Kernel
+        run: |
+          cd kernel_workspace
+          ./kernel_platform/oplus/build/oplus_build_kernel.sh pineapple gki
+
+      # ==============================================
+      # 打包 AnyKernel3
+      # ==============================================
+      - name: Make AnyKernel3 Zip
+        if: success()
+        run: |
+         git clone https://github.com/Kernel-SU/AnyKernel3 --depth=1
+         rm -rf ./AnyKernel3/.git
+         cp kernel_workspace/kernel_platform/out/msm-kernel-${{ inputs.CPUD }}-gki/dist/Image ./AnyKernel3/
+         FEIL="${{ inputs.FEIL }}"
+         ZIP_NAME="AnyKernel3_${FEIL}.zip"
+         cd AnyKernel3
+         zip -r ../$ZIP_NAME ./*
+         echo "AK3_ZIP=$ZIP_NAME" >> $GITHUB_ENV
+
+      # ==============================================
+      # 上传全部产物
+      # ==============================================
+      - name: Upload AnyKernel3 Zip
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.AK3_ZIP }}
+          path: ./${{ env.AK3_ZIP }}
+
+      - name: Upload boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot_img
+          path: kernel_workspace/kernel_platform/out/msm-kernel-${{ inputs.CPUD }}-gki/dist/boot.img
+
+      - name: Upload vendor_boot.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor_boot_img
+          path: kernel_workspace/kernel_platform/out/msm-kernel-${{ inputs.CPUD }}-gki/dist/vendor_boot.img
+
+      - name: Upload vendor_dlkm.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor_dlkm_img
+          path: kernel_workspace/kernel_platform/out/msm-kernel-${{ inputs.CPUD }}-gki/dist/vendor_dlkm.img
+
+      - name: Upload system_dlkm.img
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system_dlkm_img
+          path: kernel_workspace/kernel_platform/out/msm-kernel-${{ inputs.CPUD }}-gki/dist/system_dlkm.img
+
+      - name: Upload Pure Image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image_${{ inputs.FEIL }}
+          path: kernel_workspace/kernel_platform/out/msm-kernel-${{ inputs.CPUD }}-gki/dist/Image
+
+      - name: Upload generated .config for debug
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel_dot_config
+          path: kernel_workspace/kernel_platform/out/msm-kernel-${{ inputs.CPUD }}-gki/.config
