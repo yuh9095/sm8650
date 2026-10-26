@@ -169,11 +169,11 @@ jobs:
           sed -i '/"kernel_build",/a\    "kernel_config_fragment",' BUILD.bazel
           cat >> BUILD.bazel <<'EOF'
 
-kernel_config_fragment(
-    name = "custom.fragment",
-    srcs = ["custom.fragment"],
-)
-EOF
+          kernel_config_fragment(
+          name = "custom.fragment",
+          srcs = ["custom.fragment"],
+          )
+          EOF
           echo "==== Check patched BUILD.bazel ===="
           grep -A10 "kernel_config_fragment" BUILD.bazel
 
